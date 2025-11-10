@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
 from functools import wraps
-import pickle
+import tensorflow as tf
 import numpy as np
 from PIL import Image
 import io
@@ -27,18 +27,18 @@ db = SQLAlchemy(app)
 # Create upload folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Load ML models
-models = {}
+# Load ML model
+mole_model = None
+MOLE_MODEL_PATH = 'model_mole.keras'  # or 'model_mole.pkl' if using pickle
+PREDICTION_THRESHOLD = 0.37  # Based on your moles_temp.py analysis
+
 try:
-    with open('model1.pkl', 'rb') as f:
-        models['mole'] = pickle.load(f)
-    with open('model2.pkl', 'rb') as f:
-        models['eye'] = pickle.load(f)
-    with open('model3.pkl', 'rb') as f:
-        models['period'] = pickle.load(f)
-    print("All models loaded successfully")
+    # Load the Keras model
+    mole_model = tf.keras.models.load_model(MOLE_MODEL_PATH)
+    print(f"Mole classification model loaded successfully from {MOLE_MODEL_PATH}")
 except Exception as e:
-    print(f"Error loading models: {e}")
+    print(f"Error loading mole model: {e}")
+    print("Make sure to run convert_model.py first to create the model file")
 
 # User model
 class User(db.Model):
@@ -94,11 +94,15 @@ def token_required(f):
 # Helper functions for image processing
 def preprocess_image(image_data, target_size=(224, 224)):
     """
-    Preprocess image for model prediction
+    Preprocess image for mole classification model
+    Based on the preprocessing in moles_temp.py
     """
     try:
         # If image_data is base64 string, decode it
         if isinstance(image_data, str):
+            # Remove data URL prefix if present
+            if ',' in image_data:
+                image_data = image_data.split(',')[1]
             image_data = base64.b64decode(image_data)
         
         # Open image
@@ -108,13 +112,13 @@ def preprocess_image(image_data, target_size=(224, 224)):
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize image
+        # Resize image to match model input
         image = image.resize(target_size)
         
-        # Convert to numpy array and normalize
-        image_array = np.array(image) / 255.0
+        # Convert to numpy array and normalize (0-1 range, same as training)
+        image_array = np.array(image, dtype=np.float32) / 255.0
         
-        # Add batch dimension
+        # Add batch dimension: (1, 224, 224, 3)
         image_array = np.expand_dims(image_array, axis=0)
         
         return image_array
@@ -130,7 +134,7 @@ def home():
         'version': '1.0.0',
         'endpoints': {
             'auth': ['/signup', '/login', '/reset-password'],
-            'predictions': ['/mole/predict', '/eye/predict', '/period/predict']
+            'predictions': ['/mole/predict']
         }
     })
 
@@ -236,7 +240,7 @@ def reset_password():
 @token_required
 def predict_mole(current_user):
     try:
-        if 'mole' not in models:
+        if mole_model is None:
             return jsonify({'error': 'Mole classification model not available'}), 503
         
         # Get image data
@@ -257,107 +261,24 @@ def predict_mole(current_user):
         # Preprocess image
         processed_image = preprocess_image(image_data)
         
-        # Make prediction
-        prediction = models['mole'].predict(processed_image)
-        prediction_proba = models['mole'].predict_proba(processed_image)
+        # Make prediction using the model
+        # Model outputs sigmoid activation, so we get probability directly
+        prediction_proba = mole_model.predict(processed_image, verbose=0)
+        probability = float(prediction_proba[0][0])
         
-        # Get class labels (adjust based on your model)
-        classes = ['Benign', 'Malignant']  # Update with your actual classes
+        # Apply threshold (0.37 based on your PR curve analysis)
+        prediction_class = 1 if probability > PREDICTION_THRESHOLD else 0
+        
+        # Class labels
+        classes = ['Benign', 'Malignant']
         
         result = {
-            'prediction': classes[int(prediction[0])],
-            'confidence': float(max(prediction_proba[0])),
+            'prediction': classes[prediction_class],
             'probabilities': {
-                classes[i]: float(prediction_proba[0][i]) 
-                for i in range(len(classes))
+                'Benign': float(1 - probability),
+                'Malignant': float(probability)
             },
-            'user_id': current_user.id,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/eye/predict', methods=['POST'])
-@token_required
-def predict_eye(current_user):
-    try:
-        if 'eye' not in models:
-            return jsonify({'error': 'Eye disease classification model not available'}), 503
-        
-        # Get image data
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({'error': 'No image provided'}), 400
-        
-        if 'image' in request.files:
-            file = request.files['image']
-            if file.filename == '':
-                return jsonify({'error': 'No image selected'}), 400
-            image_data = file.read()
-        else:
-            image_data = request.json['image_data']
-        
-        # Preprocess image
-        processed_image = preprocess_image(image_data)
-        
-        # Make prediction
-        prediction = models['eye'].predict(processed_image)
-        prediction_proba = models['eye'].predict_proba(processed_image)
-        
-        # Get class labels (adjust based on your model)
-        classes = ['Normal', 'Cataract', 'Glaucoma', 'Diabetic Retinopathy']  # Update with your actual classes
-        
-        result = {
-            'prediction': classes[int(prediction[0])],
-            'confidence': float(max(prediction_proba[0])),
-            'probabilities': {
-                classes[i]: float(prediction_proba[0][i]) 
-                for i in range(len(classes))
-            },
-            'user_id': current_user.id,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/period/predict', methods=['POST'])
-@token_required
-def predict_period(current_user):
-    try:
-        if 'period' not in models:
-            return jsonify({'error': 'Period tracker model not available'}), 503
-        
-        data = request.get_json()
-        
-        # Validate required fields for period prediction
-        required_fields = ['cycle_length', 'period_length', 'age']  # Adjust based on your model
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'{field} is required'}), 400
-        
-        # Prepare input data for the model
-        input_data = np.array([[
-            data['cycle_length'],
-            data['period_length'],
-            data['age'],
-            # Add other features as required by your model
-        ]])
-        
-        # Make prediction
-        prediction = models['period'].predict(input_data)
-        
-        # Format result based on your model output
-        result = {
-            'next_period_date': prediction[0],  # Adjust based on your model output
-            'cycle_regularity': 'Regular',  # Add logic based on your model
-            'user_id': current_user.id,
-            'timestamp': datetime.utcnow().isoformat(),
-            'input_data': data
+            'user_id': current_user.id
         }
         
         return jsonify(result), 200
@@ -395,7 +316,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'database': 'connected' if db else 'disconnected',
-        'models_loaded': list(models.keys()),
+        'mole_model_loaded': mole_model is not None,
         'timestamp': datetime.utcnow().isoformat()
     })
 
