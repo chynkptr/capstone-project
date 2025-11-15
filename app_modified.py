@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 # Configuration
 app.config['SECRET_KEY'] = 'capstone1234'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:admin123@localhost:5432/capstone'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:22Feb03@localhost:5432/capstone'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -338,4 +338,4 @@ if __name__ == '__main__':
         init_db()
     
     print("Starting Flask app on port 8000")
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=True, port=8000)
