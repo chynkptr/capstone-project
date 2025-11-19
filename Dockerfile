@@ -1,30 +1,36 @@
-# Base image with Python 3.12
-FROM python:3.12-slim
+# Base image with Python 3.11 (TensorFlow 2.15.0 compatible)
+FROM python:3.11-slim
 
-# Install PostgreSQL and required tools
-RUN apt-get update && apt-get install -y postgresql postgresql-contrib libpq-dev gcc && rm -rf /var/lib/apt/lists/*
-
-# Set environment variables for PostgreSQL
-ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=admin123
-ENV POSTGRES_DB=capstone
-ENV POSTGRES_PORT=5432
-
-# Create PostgreSQL data directory
-RUN mkdir -p /var/lib/postgresql/data && chown -R postgres:postgres /var/lib/postgresql
-
-# Copy application files
+# Set working directory
 WORKDIR /app
-COPY . /app
 
-# Install Python dependencies
+# Install system dependencies (PostgreSQL client library for psycopg2)
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /app/.venv
+
+# Activate virtual environment and upgrade pip tools
+ENV PATH="/app/.venv/bin:$PATH"
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel build
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies in virtual environment
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose Flask and PostgreSQL ports
-EXPOSE 8000 5432
+# Copy application files
+COPY . .
 
-# Initialize PostgreSQL database and run both services
-CMD service postgresql start && \
-    sudo -u postgres psql -c "ALTER USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}';" && \
-    sudo -u postgres createdb ${POSTGRES_DB} && \
-    python app.py 
+# Create uploads directory
+RUN mkdir -p uploads
+
+# Expose Flask port
+EXPOSE 8000
+
+# Run the Flask application using venv python
+CMD ["/app/.venv/bin/python", "app1.py"]

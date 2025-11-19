@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database Container
+  capstone_postgres:
+    image: postgres:15-alpine
+    container_name: capstone_postgres
+    ports:
+      - "5433:5432"  # Map host port 5433 to container port 5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: capstone1234
+      POSTGRES_DB: capstone
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - capstone_network
+
+  # Flask Application Container
+  flask_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: capstone_flask_app
+    ports:
+      - "8001:8000"  # Map host port 8001 to container port 8000
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL to use containerized PostgreSQL
+      - DATABASE_URL=postgresql://postgres:capstone1234@capstone_postgres:5432/capstone
+    volumes:
+      - ./uploads:/app/uploads
+      - ./model_mole.keras:/app/model_mole.keras:ro  # Read-only mount
+    restart: unless-stopped
+    depends_on:
+      capstone_postgres:
+        condition: service_healthy
+    networks:
+      - capstone_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  capstone_network:
+    driver: bridge

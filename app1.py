@@ -11,15 +11,19 @@ import io
 import base64
 import os
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
-# Configuration
-app.config['SECRET_KEY'] = 'capstone1234'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:22Feb03@localhost:5432/capstone'
+# Configuration from environment variables
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'capstone1234')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://postgres:capstone1234@capstone_postgres:5432/capstone')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'uploads')
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))  # 16MB max file size
 
 # Initialize database
 db = SQLAlchemy(app)
@@ -29,8 +33,8 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Load ML model
 mole_model = None
-MOLE_MODEL_PATH = 'model_mole.keras'  # or 'model_mole.pkl' if using pickle
-PREDICTION_THRESHOLD = 0.37  # Based on your moles_temp.py analysis
+MOLE_MODEL_PATH = os.getenv('MOLE_MODEL_PATH', 'model_mole.keras')  # or 'model_mole.pkl' if using pickle
+PREDICTION_THRESHOLD = float(os.getenv('PREDICTION_THRESHOLD', '0.37'))  # Based on your moles_temp.py analysis
 
 try:
     # Load the Keras model
@@ -337,5 +341,9 @@ if __name__ == '__main__':
     with app.app_context():
         init_db()
     
-    print("Starting Flask app on port 8000")
-    app.run(debug=True, port=8000)
+    port = int(os.getenv('FLASK_PORT', '8000'))
+    host = os.getenv('FLASK_HOST', '0.0.0.0')
+    debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
+    print(f"Starting Flask app on {host}:{port}")
+    app.run(debug=debug, host=host, port=port)
